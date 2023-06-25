@@ -66,4 +66,21 @@ contract PuppetV2Pool {
             UniswapV2Library.getReserves(_uniswapFactory, address(_weth), address(_token));
         return UniswapV2Library.quote(amount.mul(10 ** 18), reservesToken, reservesWETH);
     }
+
+    function getOracleQuote(uint256 amount) external view returns (uint256) {
+      return _getOracleQuote(amount);
+    }
+
+    function getReservesWETH() external view returns (uint256) {
+        (uint256 reservesWETH, uint256 reservesToken) =
+            UniswapV2Library.getReserves(_uniswapFactory, address(_weth), address(_token));
+        return reservesWETH;
+    }
+
+    function getReservesToken() external view returns (uint256) {
+        (uint256 reservesWETH, uint256 reservesToken) =
+            UniswapV2Library.getReserves(_uniswapFactory, address(_weth), address(_token));
+        return reservesToken;
+    }
+
 }

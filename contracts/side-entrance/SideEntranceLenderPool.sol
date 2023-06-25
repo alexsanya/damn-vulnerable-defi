@@ -13,7 +13,7 @@ interface IFlashLoanEtherReceiver {
  * @author Damn Vulnerable DeFi (https://damnvulnerabledefi.xyz)
  */
 contract SideEntranceLenderPool {
-    mapping(address => uint256) private balances;
+    mapping(address => uint256) /*private*/public balances;
 
     error RepayFailed();
 

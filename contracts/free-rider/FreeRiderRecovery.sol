@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+import "hardhat/console.sol";
 
 /**
  * @title FreeRiderRecovery
@@ -30,6 +31,7 @@ contract FreeRiderRecovery is ReentrancyGuard, IERC721Receiver {
         beneficiary = _beneficiary;
         nft = IERC721(_nft);
         IERC721(_nft).setApprovalForAll(msg.sender, true);
+        console.log('Recovery constructor called');
     }
 
     // Read https://eips.ethereum.org/EIPS/eip-721 for more info on this function
@@ -39,6 +41,7 @@ contract FreeRiderRecovery is ReentrancyGuard, IERC721Receiver {
         nonReentrant
         returns (bytes4)
     {
+        console.log('onERC721Received called');
         if (msg.sender != address(nft))
             revert CallerNotNFT();
 
@@ -50,6 +53,8 @@ contract FreeRiderRecovery is ReentrancyGuard, IERC721Receiver {
 
         if (nft.ownerOf(_tokenId) != address(this))
             revert StillNotOwningToken(_tokenId);
+
+        console.log('Received NFT number %s', _tokenId);
 
         if (++received == 6) {
             address recipient = abi.decode(_data, (address));

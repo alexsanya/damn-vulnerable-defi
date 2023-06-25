@@ -1,0 +1,27 @@
+From a5d47759c2132175ed8b5b42a6ba28c1e436032d Mon Sep 17 00:00:00 2001
+From: tincho <tinchoabbate@noreply.users.github.com>
+Date: Fri, 20 Jan 2023 12:34:48 +0100
+Subject: [PATCH] add link to support
+
+---
+ README.md | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/README.md b/README.md
+index 7d76b44..936b318 100644
+--- a/README.md
++++ b/README.md
+@@ -8,6 +8,10 @@ Featuring flash loans, price oracles, governance, NFTs, lending pools, smart con
+ 
+ Visit [damnvulnerabledefi.xyz](https://damnvulnerabledefi.xyz)
+ 
++## Support
++
++For Q&A, support and troubleshooting running Damn Vulnerable DeFi, go [here](https://github.com/tinchoabbate/damn-vulnerable-defi/discussions/categories/support-q-a-troubleshooting).
++
+ ## Disclaimer
+ 
+ All Solidity code, practices and patterns in this repository are DAMN VULNERABLE and for educational purposes only.
+-- 
+2.39.1
+

